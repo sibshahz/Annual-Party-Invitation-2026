@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, Cambria, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-alabaster: #faf8f3;
+  --color-porcelain: #ffffff;
+  --color-ink: #3a2c10;
+  --color-slate-ink: #6b5528;
+  --color-gold: #8c6414;
+  --color-gold-foil: #cfa956;
+}
+
+@layer base {
+  html {
+    background-color: #faf8f3;
+    color: #3a2c10;
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background-color: #faf8f3;
+    color: #3a2c10;
+    overflow-x: hidden;
+  }
+}
+
+.gold-foil-text {
+  background: linear-gradient(135deg, #74510c 0%, #c49732 45%, #845e11 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Subtle light-paper grain on fixed pointer-events-none layer */
+.grain-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 240 240' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+/* Weightless Antigravity float motion using GPU transform only */
+@keyframes float-spatial {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+.animate-float-spatial {
+  animation: float-spatial 6.5s ease-in-out infinite;
+}
+
+@keyframes pulse-scroll-cue {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate3d(0, 6px, 0);
+    opacity: 1;
+  }
+}
+
+.animate-scroll-cue {
+  animation: pulse-scroll-cue 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-float-spatial,
+  .animate-scroll-cue {
+    animation: none !important;
+  }
+}
