@@ -25,14 +25,25 @@ export function ScrollProgress({ accentColor, routeSlug }: ScrollProgressProps) 
           trigger: document.documentElement,
           start: 'top top',
           end: 'bottom bottom',
-          scrub: 0.25,
+          scrub: 0.12,
           refreshPriority: -5,
         },
       });
     });
 
     mm.add('(prefers-reduced-motion: reduce)', () => {
-      gsap.set(barRef.current, { scaleX: 1 });
+      gsap.set(barRef.current, { scaleX: 0, transformOrigin: 'left center' });
+      gsap.to(barRef.current, {
+        scaleX: 1,
+        ease: 'none',
+        scrollTrigger: {
+          trigger: document.documentElement,
+          start: 'top top',
+          end: 'bottom bottom',
+          scrub: true,
+          refreshPriority: -5,
+        },
+      });
     });
 
     return () => mm.revert();

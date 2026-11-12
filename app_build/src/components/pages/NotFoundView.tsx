@@ -11,7 +11,7 @@ export function NotFoundView() {
   return (
     <main className="relative min-h-[100dvh] flex items-center justify-center px-4 py-16 overflow-x-hidden">
       <AmbientBackdrop theme={defaultTheme} />
-      <div className="relative z-10 max-w-lg w-full rounded-3xl p-8 sm:p-10 bg-white/85 backdrop-blur-xl border border-[#B8923E]/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.96),0_32px_64px_-20px_rgba(140,104,25,0.16)] text-center space-y-6">
+      <div className="surface-enter relative z-10 max-w-lg w-full rounded-3xl p-8 sm:p-10 bg-white/85 backdrop-blur-xl border border-[#B8923E]/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.96),0_32px_64px_-20px_rgba(140,104,25,0.16)] text-center space-y-6">
         <div className="flex justify-center">
           <SocietyCrest accentColor={defaultTheme.accentHex} className="w-16 h-16" />
         </div>

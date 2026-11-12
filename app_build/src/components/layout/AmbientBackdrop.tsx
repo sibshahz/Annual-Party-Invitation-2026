@@ -16,7 +16,7 @@ export function AmbientBackdrop({ theme, surgeNonce = 0 }: AmbientBackdropProps)
       <LiquidGoldCanvas surgeNonce={surgeNonce} />
 
       <div
-        className="absolute -top-44 left-1/2 -translate-x-1/2 w-[960px] h-[560px] rounded-full blur-3xl opacity-35 transition-colors duration-700"
+        className="absolute -top-44 left-1/2 -translate-x-1/2 w-[960px] h-[560px] rounded-full blur-3xl opacity-35"
         style={{
           background: `radial-gradient(circle at center, ${theme.atmosphericGlowRgba} 0%, rgba(250,248,243,0) 70%)`,
         }}

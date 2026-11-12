@@ -1,4 +1,5 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { ArrowDown } from '@phosphor-icons/react';
 import {
   gsap,
   Observer,
@@ -12,11 +13,11 @@ interface GoldenEnvelopeStageProps {
   edition: InvitationEdition;
   guestName?: string;
   batchLabel?: string;
-  isOpen: boolean;
   replayNonce: number;
+  disabled?: boolean;
   onOpeningStart: () => void;
-  onRevealHero: () => void;
-  onComplete: () => void;
+  onEmerged: (closeTimeline: gsap.core.Timeline) => void;
+  onRequestScrollDown: () => void;
 }
 
 const MOTE_PATHS = [
@@ -35,22 +36,24 @@ const SEAL_OPEN_STARBURST_PATH =
   'M48,2 C54,18 65,14 78,10 C74,24 84,32 94,38 C80,46 82,58 92,68 C76,68 70,79 72,92 C59,82 48,84 48,95 C48,84 37,82 24,92 C26,79 20,68 4,68 C14,58 16,46 2,38 C12,32 22,24 18,10 C31,14 42,18 48,2 Z';
 
 /**
- * Theatrical 3D luxury golden envelope opening sequence built across GSAP core, Timeline,
- * CustomEase, DrawSVG, MorphSVG, MotionPath, SplitText, Observer, quickTo, and gsap.utils.
+ * Theatrical 3D luxury golden envelope opening sequence.
+ * Remains opened with emerged card until the user scrolls down, then provides a
+ * ScrollTrigger-scrubbed closing & left-exit child timeline to InvitationView.
  */
 export function GoldenEnvelopeStage({
   edition,
   guestName,
   batchLabel,
-  isOpen,
   replayNonce,
+  disabled = false,
   onOpeningStart,
-  onRevealHero,
-  onComplete,
+  onEmerged,
+  onRequestScrollDown,
 }: GoldenEnvelopeStageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const envelopeShellRef = useRef<HTMLDivElement>(null);
   const envelopeBodyRef = useRef<HTMLDivElement>(null);
+  const envelopeBackRef = useRef<HTMLDivElement>(null);
   const flapRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const pocketRef = useRef<HTMLDivElement>(null);
@@ -58,50 +61,57 @@ export function GoldenEnvelopeStage({
   const sealShapeRef = useRef<SVGPathElement>(null);
   const sealOpenShapeRef = useRef<SVGPathElement>(null);
   const sealRingRef = useRef<SVGCircleElement>(null);
+  const pulseRing1Ref = useRef<SVGCircleElement>(null);
   const sheenRef = useRef<HTMLDivElement>(null);
   const shadowRef = useRef<HTMLDivElement>(null);
   const cardSubtitleRef = useRef<HTMLParagraphElement>(null);
   const hintRef = useRef<HTMLDivElement>(null);
+  const scrollPromptRef = useRef<HTMLDivElement>(null);
 
   const hasTriggeredRef = useRef(false);
+  const hasEmergedRef = useRef(false);
   const triggerOpenRef = useRef<() => void>(() => {});
   const [isUnsealing, setIsUnsealing] = useState(false);
+  const [isEmerged, setIsEmerged] = useState(false);
+
+  const onOpeningStartRef = useRef(onOpeningStart);
+  onOpeningStartRef.current = onOpeningStart;
+  const onEmergedRef = useRef(onEmerged);
+  onEmergedRef.current = onEmerged;
 
   const uid = useId().replace(/:/g, '');
   const resolvedGuest = guestName || edition.defaultGuestTitle;
 
-  const { contextSafe } = useGSAP({ scope: stageRef });
+  const { contextSafe } = useGSAP(
+    () => {
+      if (disabled || !stageRef.current) return;
 
-  useLayoutEffect(() => {
-    if (isOpen || !stageRef.current) return;
+      hasTriggeredRef.current = false;
+      hasEmergedRef.current = false;
+      setIsUnsealing(false);
+      setIsEmerged(false);
 
-    hasTriggeredRef.current = false;
-    setIsUnsealing(false);
+      const q = gsap.utils.selector(stageRef);
+      const mm = gsap.matchMedia();
 
-    const q = gsap.utils.selector(stageRef);
-    const mm = gsap.matchMedia();
+      mm.add(
+        {
+          isDesktop: '(min-width: 768px)',
+          isMobile: '(max-width: 767px)',
+          reduceMotion: '(prefers-reduced-motion: reduce)',
+        },
+        (context) => {
+          const { isDesktop, reduceMotion } = context.conditions ?? {};
 
-    mm.add(
-      {
-        isDesktop: '(min-width: 768px)',
-        isMobile: '(max-width: 767px)',
-        reduceMotion: '(prefers-reduced-motion: reduce)',
-      },
-      (context) => {
-        const { isDesktop, reduceMotion } = context.conditions ?? {};
+          if (reduceMotion) return;
 
-          if (reduceMotion) {
-            onOpeningStart();
-            onRevealHero();
-            onComplete();
-            return;
-          }
+          const arriveX = isDesktop ? 108 : 64;
+          const arriveY = isDesktop ? 112 : 76;
 
           const foilLines = gsap.utils.toArray<SVGGeometryElement>(q('[data-foil-draw]'));
           const motes = gsap.utils.toArray<SVGGElement>(q('[data-gold-mote]'));
           const motePaths = gsap.utils.toArray<SVGPathElement>(q('[data-mote-path]'));
 
-          // SplitText on rising card editorial subtitle (solid gold ink, never background-clip)
           let splitSubtitle: SplitText | null = null;
           if (cardSubtitleRef.current) {
             splitSubtitle = SplitText.create(cardSubtitleRef.current, {
@@ -111,17 +121,28 @@ export function GoldenEnvelopeStage({
             gsap.set(splitSubtitle.words, { autoAlpha: 0, y: 14 });
           }
 
-          // Initial 3D resting geometry
+          // Initial 3D resting geometry (positioned along curved arrival arc start)
+          gsap.set(stageRef.current, { autoAlpha: 1, clearProps: 'pointerEvents' });
           gsap.set(envelopeShellRef.current, {
             transformPerspective: 1600,
+            transformOrigin: '50% 50%',
             rotationX: 16,
-            rotationY: -4,
-            y: 38,
+            rotationY: -10,
+            rotation: 9,
+            x: arriveX,
+            y: arriveY,
+            xPercent: 0,
+            yPercent: 0,
             scale: 0.9,
             autoAlpha: 1,
           });
           gsap.set(envelopeBodyRef.current, {
             transformPerspective: 1400,
+            transformOrigin: '50% 50%',
+            rotationX: 0,
+            rotationY: 0,
+            rotation: 0,
+            y: 0,
           });
           gsap.set(flapRef.current, {
             transformPerspective: 1400,
@@ -130,25 +151,52 @@ export function GoldenEnvelopeStage({
             zIndex: 30,
           });
           gsap.set(cardRef.current, {
+            xPercent: 0,
             yPercent: 0,
             scale: 0.96,
+            rotation: 0,
             rotationX: 3,
             transformPerspective: 1200,
+            transformOrigin: '50% 50%',
             zIndex: 10,
+          });
+          gsap.set(sealBtnRef.current, {
+            scale: 1,
+            x: 0,
+            y: 0,
+            rotation: 0,
+            transformOrigin: '50% 50%',
+            autoAlpha: 1,
           });
           gsap.set(foilLines, { drawSVG: '0% 0%' });
           if (sealRingRef.current) {
-            gsap.set(sealRingRef.current, { drawSVG: '0% 0%' });
+            gsap.set(sealRingRef.current, {
+              drawSVG: '0% 0%',
+              transformOrigin: '50% 50%',
+            });
+          }
+          if (pulseRing1Ref.current) {
+            gsap.set(pulseRing1Ref.current, {
+              transformOrigin: '50% 50%',
+              scale: 0.96,
+              autoAlpha: 0,
+            });
+          }
+          if (hintRef.current) {
+            gsap.set(hintRef.current, { autoAlpha: 0, y: 8 });
+          }
+          if (scrollPromptRef.current) {
+            gsap.set(scrollPromptRef.current, { autoAlpha: 0, y: 12 });
           }
           gsap.set(sheenRef.current, { xPercent: -135 });
           gsap.set(motes, { autoAlpha: 0, scale: 0.4 });
 
           // Pointer-reactive 3D micro-tilt using gsap.quickTo while sealed
           const quickRotX = envelopeBodyRef.current
-            ? gsap.quickTo(envelopeBodyRef.current, 'rotationX', { duration: 0.7, ease: 'power3.out' })
+            ? gsap.quickTo(envelopeBodyRef.current, 'rotationX', { duration: 0.42, ease: 'power3.out' })
             : null;
           const quickRotY = envelopeBodyRef.current
-            ? gsap.quickTo(envelopeBodyRef.current, 'rotationY', { duration: 0.7, ease: 'power3.out' })
+            ? gsap.quickTo(envelopeBodyRef.current, 'rotationY', { duration: 0.42, ease: 'power3.out' })
             : null;
 
           const mapPointerX = gsap.utils.pipe(
@@ -177,6 +225,7 @@ export function GoldenEnvelopeStage({
           // Subtle weightless levitation while waiting
           const floatTween = gsap.to(envelopeBodyRef.current, {
             y: -7,
+            rotation: 0.85,
             duration: 2.6,
             repeat: -1,
             yoyo: true,
@@ -194,7 +243,326 @@ export function GoldenEnvelopeStage({
             paused: true,
           });
 
-          // Master Unseal Choreography Timeline (paused until seal click, scroll, or anticipation timer)
+          const emergedFloatTween = gsap.to(envelopeBodyRef.current, {
+            y: -5,
+            rotation: 0.65,
+            duration: 2.8,
+            repeat: -1,
+            yoyo: true,
+            ease: 'sine.inOut',
+            paused: true,
+          });
+
+          const emergedShadowFloatTween = gsap.to(shadowRef.current, {
+            scaleX: 0.95,
+            opacity: 0.58,
+            duration: 2.8,
+            repeat: -1,
+            yoyo: true,
+            ease: 'sine.inOut',
+            paused: true,
+          });
+
+          const handleEmergedFloatScroll = () => {
+            if (!hasEmergedRef.current) return;
+            if (window.scrollY > 6) {
+              if (!emergedFloatTween.paused()) {
+                emergedFloatTween.pause();
+                emergedShadowFloatTween.pause();
+                gsap.to(envelopeBodyRef.current, {
+                  y: 0,
+                  rotation: 0,
+                  duration: 0.24,
+                  ease: 'emilOut',
+                  overwrite: 'auto',
+                });
+                gsap.to(shadowRef.current, { scaleX: 1, opacity: 0.72, duration: 0.24, ease: 'emilOut', overwrite: 'auto' });
+              }
+            } else if (emergedFloatTween.paused()) {
+              emergedFloatTween.play();
+              emergedShadowFloatTween.play();
+            }
+          };
+
+          // Calm, intentional wax-seal prompt (one clean ripple + gentle breathing ring)
+          const ringPromptTl = gsap.timeline({ paused: true });
+          if (sealRingRef.current) {
+            ringPromptTl.to(
+              sealRingRef.current,
+              {
+                scale: 1.05,
+                autoAlpha: 0.72,
+                duration: 1.15,
+                repeat: -1,
+                yoyo: true,
+                ease: 'sine.inOut',
+              },
+              0
+            );
+          }
+          if (pulseRing1Ref.current) {
+            ringPromptTl.fromTo(
+              pulseRing1Ref.current,
+              { scale: 1.0, autoAlpha: 0.85 },
+              {
+                scale: 1.65,
+                autoAlpha: 0,
+                duration: 1.35,
+                repeat: -1,
+                repeatDelay: 1.5,
+                ease: 'power2.out',
+              },
+              0.2
+            );
+          }
+
+          const emergeCardY = isDesktop ? -58 : -50;
+          const emergeCardScale = isDesktop ? 1.03 : 1.01;
+          const shellEmergeY = gsap.utils.clamp(
+            isDesktop ? 76 : 52,
+            isDesktop ? 142 : 96,
+            Math.round(window.innerHeight * (isDesktop ? 0.175 : 0.13))
+          );
+
+          let lastNudgeMs = 0;
+          const triggerSealedScrollNudge = () => {
+            if (hasTriggeredRef.current) return;
+            const now = performance.now();
+            if (now - lastNudgeMs < 480) return;
+            lastNudgeMs = now;
+
+            if (envelopeBodyRef.current) {
+              gsap.fromTo(
+                envelopeBodyRef.current,
+                { y: 0 },
+                { y: -6, duration: 0.13, yoyo: true, repeat: 1, ease: 'emilOut', overwrite: 'auto' }
+              );
+            }
+            if (hintRef.current) {
+              gsap.fromTo(
+                hintRef.current,
+                { scale: 1 },
+                { scale: 1.045, duration: 0.14, yoyo: true, repeat: 1, ease: 'emilOut', overwrite: 'auto' }
+              );
+            }
+          };
+
+          // Lock scroll while sealed or mid-unseal so the page waits until card emerges
+          const lockScrollWheel = Observer.create({
+            target: window,
+            type: 'wheel',
+            tolerance: 8,
+            preventDefault: true,
+            onDown: triggerSealedScrollNudge,
+            onUp: triggerSealedScrollNudge,
+          });
+
+          const lockScrollTouch = Observer.create({
+            target: window,
+            type: 'touch',
+            tolerance: 10,
+            preventDefault: false,
+            onUp: triggerSealedScrollNudge,
+          });
+
+          const keepTopWhileSealed = () => {
+            if (!hasEmergedRef.current && window.scrollY > 0) {
+              window.scrollTo(0, 0);
+            }
+          };
+
+          const lockKeyScroll = (e: KeyboardEvent) => {
+            if (!hasEmergedRef.current && (e.key === 'ArrowDown' || e.key === 'PageDown')) {
+              e.preventDefault();
+              triggerSealedScrollNudge();
+            }
+          };
+
+          window.addEventListener('scroll', keepTopWhileSealed, { passive: true });
+          window.addEventListener('keydown', lockKeyScroll);
+
+          const buildScrollCloseTimeline = (): gsap.core.Timeline => {
+            const closeTl = gsap.timeline();
+
+            closeTl
+              .addLabel('closeEnvelope', 0)
+              .fromTo(
+                scrollPromptRef.current,
+                { autoAlpha: 1, y: 0 },
+                { autoAlpha: 0, y: 12, duration: 0.28, ease: 'power2.out', immediateRender: false },
+                'closeEnvelope'
+              )
+              .fromTo(
+                cardRef.current,
+                {
+                  yPercent: emergeCardY,
+                  scale: emergeCardScale,
+                  rotationX: 0,
+                },
+                {
+                  yPercent: 0,
+                  scale: 0.96,
+                  rotationX: 3,
+                  duration: 0.95,
+                  ease: 'power1.inOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope'
+              )
+              .fromTo(
+                cardRef.current,
+                { xPercent: 0, rotation: 0 },
+                {
+                  xPercent: 2,
+                  rotation: 1.6,
+                  duration: 0.45,
+                  ease: 'sine.inOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope'
+              )
+              .fromTo(
+                cardRef.current,
+                { xPercent: 2, rotation: 1.6 },
+                {
+                  xPercent: 0,
+                  rotation: 0,
+                  duration: 0.5,
+                  ease: 'emilOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope+=0.45'
+              )
+              .fromTo(
+                envelopeShellRef.current,
+                { x: 0, y: shellEmergeY },
+                {
+                  motionPath: {
+                    path: [
+                      { x: 0, y: shellEmergeY },
+                      { x: isDesktop ? -34 : -22, y: Math.round(shellEmergeY * 0.4) },
+                      { x: 0, y: 0 },
+                    ],
+                    curviness: 1.35,
+                    fromCurrent: false,
+                  },
+                  duration: 0.95,
+                  ease: 'arcDepart',
+                  immediateRender: false,
+                },
+                'closeEnvelope'
+              )
+              .fromTo(
+                envelopeShellRef.current,
+                { rotation: 0 },
+                {
+                  rotation: -2.5,
+                  duration: 0.45,
+                  ease: 'sine.inOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope'
+              )
+              .fromTo(
+                envelopeShellRef.current,
+                { rotation: -2.5 },
+                {
+                  rotation: 0,
+                  duration: 0.5,
+                  ease: 'emilOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope+=0.45'
+              )
+              .fromTo(
+                flapRef.current,
+                { rotationX: 176 },
+                {
+                  rotationX: 0,
+                  duration: 0.85,
+                  ease: 'power1.inOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope+=0.22'
+              )
+              // Swap flap back in front of card right at 90deg mid-fold (works both forwards & backwards on scrub)
+              .set(flapRef.current, { zIndex: 30 }, 'closeEnvelope+=0.64')
+              .fromTo(
+                sealShapeRef.current,
+                { morphSVG: SEAL_OPEN_STARBURST_PATH },
+                {
+                  morphSVG: {
+                    shape: SEAL_CLOSED_PATH,
+                    type: 'rotational',
+                  },
+                  duration: 0.24,
+                  ease: 'power2.out',
+                  immediateRender: false,
+                },
+                'closeEnvelope+=0.94'
+              )
+              .fromTo(
+                sealBtnRef.current,
+                { autoAlpha: 0, scale: 0.74, x: 64, y: -28, rotation: 26 },
+                {
+                  autoAlpha: 1,
+                  scale: 1,
+                  rotation: 0,
+                  motionPath: {
+                    path: [
+                      { x: 64, y: -28 },
+                      { x: 24, y: -52 },
+                      { x: 0, y: 0 },
+                    ],
+                    curviness: 1.35,
+                    fromCurrent: false,
+                  },
+                  duration: 0.24,
+                  ease: 'emilOut',
+                  immediateRender: false,
+                },
+                'closeEnvelope+=0.94'
+              )
+              .addLabel('exitLeft', 'closeEnvelope+=1.12')
+              .fromTo(
+                envelopeShellRef.current,
+                { xPercent: 0, yPercent: 0, rotation: 0, rotationY: 0, rotationX: 0, scale: 1 },
+                {
+                  motionPath: {
+                    path: [
+                      { xPercent: 0, yPercent: 0 },
+                      { xPercent: -52, yPercent: -18 },
+                      { xPercent: -165, yPercent: 38 },
+                    ],
+                    curviness: 1.35,
+                    fromCurrent: false,
+                  },
+                  rotation: -14,
+                  rotationY: -15,
+                  rotationX: 6,
+                  scale: 0.9,
+                  duration: 1.03,
+                  ease: 'arcDepart',
+                  immediateRender: false,
+                },
+                'exitLeft'
+              )
+              .fromTo(
+                stageRef.current,
+                { autoAlpha: 1 },
+                {
+                  autoAlpha: 0,
+                  duration: 0.35,
+                  ease: 'emilOut',
+                  immediateRender: false,
+                },
+                'exitLeft+=0.68'
+              );
+
+            return closeTl;
+          };
+
+          // Master Unseal & Emerge Choreography (stops at emerged state; waits for scroll)
           const openTl = gsap.timeline({
             paused: true,
             defaults: { ease: 'luxurySilk' },
@@ -203,8 +571,54 @@ export function GoldenEnvelopeStage({
           openTl
             .addLabel('unseal', 0)
             .to(
-              [hintRef.current, q('[data-skip-btn]')],
-              { autoAlpha: 0, y: 10, duration: 0.35, ease: 'power2.out' },
+              envelopeShellRef.current,
+              {
+                scale: 1,
+                rotationX: 0,
+                rotationY: 0,
+                rotation: 0,
+                x: 0,
+                y: 0,
+                duration: 0.28,
+                ease: 'emilOut',
+                overwrite: 'auto',
+              },
+              'unseal'
+            )
+            .to(
+              foilLines,
+              {
+                drawSVG: '0% 100%',
+                duration: 0.25,
+                ease: 'power2.out',
+                overwrite: 'auto',
+              },
+              'unseal'
+            )
+            .to(
+              sheenRef.current,
+              {
+                autoAlpha: 0,
+                duration: 0.2,
+                ease: 'power2.out',
+                overwrite: 'auto',
+              },
+              'unseal'
+            )
+            .to(
+              hintRef.current,
+              { autoAlpha: 0, y: 8, duration: 0.22, ease: 'emilOut', overwrite: 'auto' },
+              'unseal'
+            )
+            .to(
+              [pulseRing1Ref.current, sealRingRef.current].filter(Boolean),
+              {
+                autoAlpha: 0,
+                scale: '+=0.18',
+                duration: 0.22,
+                ease: 'emilOut',
+                overwrite: 'auto',
+              },
               'unseal'
             )
             .to(
@@ -212,9 +626,21 @@ export function GoldenEnvelopeStage({
               {
                 rotationX: 0,
                 rotationY: 0,
+                rotation: 0,
                 y: 0,
-                duration: 0.45,
-                ease: 'power2.out',
+                duration: 0.36,
+                ease: 'emilOut',
+                overwrite: 'auto',
+              },
+              'unseal'
+            )
+            .to(
+              shadowRef.current,
+              {
+                scaleX: 1,
+                opacity: 0.72,
+                duration: 0.3,
+                ease: 'emilOut',
                 overwrite: 'auto',
               },
               'unseal'
@@ -226,7 +652,7 @@ export function GoldenEnvelopeStage({
                   shape: sealOpenShapeRef.current || SEAL_OPEN_STARBURST_PATH,
                   type: 'rotational',
                 },
-                duration: 0.34,
+                duration: 0.28,
                 ease: 'waxSnap',
               },
               'unseal'
@@ -234,9 +660,17 @@ export function GoldenEnvelopeStage({
             .to(
               sealBtnRef.current,
               {
-                scale: 1.18,
-                y: -8,
-                duration: 0.26,
+                scale: 1.14,
+                rotation: -8,
+                motionPath: {
+                  path: [
+                    { x: 0, y: 0 },
+                    { x: -8, y: -14 },
+                  ],
+                  curviness: 1.2,
+                  fromCurrent: false,
+                },
+                duration: 0.2,
                 ease: 'waxSnap',
               },
               'unseal'
@@ -244,34 +678,71 @@ export function GoldenEnvelopeStage({
             .to(
               sealBtnRef.current,
               {
-                scale: 0.65,
+                scale: 0.74,
                 autoAlpha: 0,
-                y: -24,
-                duration: 0.24,
-                ease: 'power2.in',
+                rotation: 26,
+                motionPath: {
+                  path: [
+                    { x: -8, y: -14 },
+                    { x: 24, y: -52 },
+                    { x: 64, y: -28 },
+                  ],
+                  curviness: 1.35,
+                  fromCurrent: false,
+                },
+                duration: 0.28,
+                ease: 'emilOut',
               },
               'unseal+=0.2'
             )
-            .addLabel('unfold', 'unseal+=0.26')
+            .addLabel('unfold', 'unseal+=0.22')
             .to(
               flapRef.current,
               {
                 rotationX: 176,
-                duration: 0.72,
+                duration: 0.66,
                 ease: 'flapHinge',
               },
               'unfold'
             )
-            // Swap flap z-index right as it passes edge-on (90 deg) so card emerges cleanly in front
-            .set(flapRef.current, { zIndex: 2 }, 'unfold+=0.34')
-            .addLabel('emerge', 'unfold+=0.38')
+            .set(flapRef.current, { zIndex: 2 }, 'unfold+=0.31')
+            .addLabel('emerge', 'unfold+=0.34')
             .to(
               cardRef.current,
               {
-                yPercent: isDesktop ? -64 : -56,
-                scale: isDesktop ? 1.06 : 1.02,
+                yPercent: emergeCardY,
+                scale: emergeCardScale,
                 rotationX: 0,
-                duration: 0.86,
+                duration: 0.84,
+                ease: 'luxurySilk',
+              },
+              'emerge'
+            )
+            .to(
+              cardRef.current,
+              {
+                xPercent: -2.2,
+                rotation: -1.8,
+                duration: 0.36,
+                ease: 'sine.inOut',
+              },
+              'emerge'
+            )
+            .to(
+              cardRef.current,
+              {
+                xPercent: 0,
+                rotation: 0,
+                duration: 0.48,
+                ease: 'emilOut',
+              },
+              'emerge+=0.36'
+            )
+            .to(
+              envelopeShellRef.current,
+              {
+                y: shellEmergeY,
+                duration: 0.84,
                 ease: 'luxurySilk',
               },
               'emerge'
@@ -279,11 +750,22 @@ export function GoldenEnvelopeStage({
             .to(
               envelopeShellRef.current,
               {
-                y: isDesktop ? 68 : 48,
-                duration: 0.86,
-                ease: 'luxurySilk',
+                x: 16,
+                rotation: 2,
+                duration: 0.36,
+                ease: 'sine.inOut',
               },
               'emerge'
+            )
+            .to(
+              envelopeShellRef.current,
+              {
+                x: 0,
+                rotation: 0,
+                duration: 0.48,
+                ease: 'emilOut',
+              },
+              'emerge+=0.36'
             );
 
           if (splitSubtitle && splitSubtitle.words.length > 0) {
@@ -292,24 +774,24 @@ export function GoldenEnvelopeStage({
               {
                 autoAlpha: 1,
                 y: 0,
-                duration: 0.45,
-                stagger: { amount: 0.22, from: 'start' },
-                ease: 'power3.out',
+                duration: 0.46,
+                stagger: { amount: 0.18, from: 'start', ease: 'power1.out' },
+                ease: 'editorialGlide',
               },
-              'emerge+=0.18'
+              'emerge+=0.20'
             );
           }
 
-          // MotionPath golden light motes rising from the opened envelope mouth
           const moteDuration = gsap.utils.distribute({
-            base: 0.88,
-            amount: 0.35,
+            base: 0.56,
+            amount: 0.16,
             from: 'center',
           });
 
           motes.forEach((mote, idx) => {
             const pathEl = motePaths[idx];
             if (!pathEl) return;
+            const offset = (idx * 0.025).toFixed(3);
             openTl.to(
               mote,
               {
@@ -319,75 +801,82 @@ export function GoldenEnvelopeStage({
                   alignOrigin: [0.5, 0.5],
                   autoRotate: false,
                 },
-                scale: gsap.utils.random(0.85, 1.3),
+                scale: gsap.utils.random(0.85, 1.25),
+                rotation: idx % 2 === 0 ? 55 : -55,
                 duration: moteDuration(idx, mote, motes),
                 ease: 'power1.out',
               },
-              `emerge+=${(idx * 0.04).toFixed(2)}`
+              `emerge+=${(0.16 + Number(offset)).toFixed(3)}`
             );
             openTl.to(
               mote,
-              { autoAlpha: 0.95, duration: 0.22, ease: 'power1.out' },
-              `emerge+=${(idx * 0.04).toFixed(2)}`
+              { autoAlpha: 0.92, duration: 0.18, ease: 'power1.out' },
+              `emerge+=${(0.16 + Number(offset)).toFixed(3)}`
             );
             openTl.to(
               mote,
-              { autoAlpha: 0, duration: 0.36, ease: 'power1.in' },
-              `emerge+=${(0.58 + idx * 0.04).toFixed(2)}`
+              { autoAlpha: 0, duration: 0.24, ease: 'emilOut' },
+              `emerge+=${(0.54 + Number(offset)).toFixed(3)}`
             );
           });
 
-          // Final reveal handoff into HeroStage
-          openTl
-            .addLabel('reveal', 'emerge+=0.92')
-            .call(() => onRevealHero(), undefined, 'reveal')
-            .to(
-              [pocketRef.current, flapRef.current, shadowRef.current],
-              {
-                y: 95,
-                autoAlpha: 0,
-                duration: 0.52,
-                ease: 'power2.in',
-              },
-              'reveal'
-            )
-            .to(
-              cardRef.current,
-              {
-                scale: 1.12,
-                yPercent: -78,
-                autoAlpha: 0,
-                duration: 0.55,
-                ease: 'power2.inOut',
-              },
-              'reveal+=0.04'
-            )
-            .to(
-              stageRef.current,
-              {
-                autoAlpha: 0,
-                duration: 0.44,
-                ease: 'power2.out',
-                onComplete: () => {
-                  onComplete();
-                },
-              },
-              'reveal+=0.16'
-            );
+          const markEmerged = () => {
+            if (hasEmergedRef.current) return;
+            hasEmergedRef.current = true;
+            setIsEmerged(true);
 
-          // Arrival + sealed shimmer + subtle anticipation countdown timeline
+            lockScrollWheel.kill();
+            lockScrollTouch.kill();
+            window.removeEventListener('scroll', keepTopWhileSealed);
+            window.removeEventListener('keydown', lockKeyScroll);
+
+            window.addEventListener('scroll', handleEmergedFloatScroll, { passive: true });
+
+            const closeTl = buildScrollCloseTimeline();
+            onEmergedRef.current(closeTl);
+          };
+
+          if (scrollPromptRef.current) {
+            openTl.to(
+              scrollPromptRef.current,
+              {
+                autoAlpha: 1,
+                y: 0,
+                duration: 0.32,
+                ease: 'emilOut',
+              },
+              'emerge+=0.52'
+            );
+          }
+
+          openTl.eventCallback('onComplete', () => {
+            markEmerged();
+            emergedFloatTween.play();
+            emergedShadowFloatTween.play();
+          });
+
+          // Arrival + sealed shimmer + white click-indicator ring draw
           const arriveTl = gsap.timeline();
           arriveTl
             .addLabel('arrive', 0)
             .to(
               envelopeShellRef.current,
               {
+                motionPath: {
+                  path: [
+                    { x: arriveX, y: arriveY },
+                    { x: Math.round(arriveX * 0.28), y: isDesktop ? -22 : -14 },
+                    { x: 0, y: 0 },
+                  ],
+                  curviness: 1.35,
+                  fromCurrent: false,
+                },
                 rotationX: 0,
                 rotationY: 0,
-                y: 0,
+                rotation: 0,
                 scale: 1,
-                duration: 0.68,
-                ease: 'luxurySilk',
+                duration: 0.85,
+                ease: 'arcArrive',
               },
               'arrive'
             )
@@ -395,42 +884,58 @@ export function GoldenEnvelopeStage({
               foilLines,
               {
                 drawSVG: '0% 100%',
-                duration: 0.7,
-                stagger: 0.06,
+                duration: 0.64,
+                stagger: { amount: 0.16, ease: 'power1.out' },
                 ease: 'power2.inOut',
               },
-              'arrive+=0.2'
+              'arrive+=0.18'
             )
             .to(
               sheenRef.current,
               {
                 xPercent: 135,
-                duration: 0.95,
+                duration: 0.85,
                 ease: 'power2.inOut',
               },
-              'arrive+=0.28'
+              'arrive+=0.26'
+            )
+            .to(
+              hintRef.current,
+              {
+                autoAlpha: 1,
+                y: 0,
+                duration: 0.42,
+                ease: 'emilOut',
+              },
+              'arrive+=0.42'
             )
             .call(() => {
               floatTween.play();
               shadowFloatTween.play();
-            }, undefined, 'arrive+=0.55')
-            .addLabel('anticipate', 'arrive+=0.6');
+            }, undefined, 'arrive+=0.55');
 
           if (sealRingRef.current) {
-            arriveTl.to(
-              sealRingRef.current,
-              {
-                drawSVG: '0% 100%',
-                duration: 1.45,
-                ease: 'none',
-                onComplete: () => {
-                  if (!hasTriggeredRef.current) {
-                    triggerOpenRef.current();
-                  }
+            arriveTl
+              .to(
+                sealRingRef.current,
+                {
+                  drawSVG: '0% 100%',
+                  duration: 0.58,
+                  ease: 'power2.out',
                 },
-              },
-              'anticipate'
-            );
+                'arrive+=0.32'
+              )
+              .call(() => {
+                if (!hasTriggeredRef.current) {
+                  ringPromptTl.play(0);
+                }
+              });
+          } else {
+            arriveTl.call(() => {
+              if (!hasTriggeredRef.current) {
+                ringPromptTl.play(0);
+              }
+            });
           }
 
           const runUnseal = () => {
@@ -439,84 +944,66 @@ export function GoldenEnvelopeStage({
             setIsUnsealing(true);
 
             arriveTl.kill();
+            ringPromptTl.kill();
             floatTween.kill();
             shadowFloatTween.kill();
             window.removeEventListener('pointermove', handlePointerMove);
 
-            onOpeningStart();
+            onOpeningStartRef.current();
             openTl.play(0);
           };
 
           triggerOpenRef.current = runUnseal;
 
-          // Scroll / swipe gesture anywhere on the sealed stage immediately unseals the envelope
-          const observer = Observer.create({
-            target: stageRef.current,
-            type: 'wheel,touch',
-            tolerance: 14,
-            preventDefault: true,
-            onDown: () => runUnseal(),
-            onUp: () => runUnseal(),
-          });
-
           return () => {
-            observer.kill();
+            lockScrollWheel.kill();
+            lockScrollTouch.kill();
             arriveTl.kill();
+            ringPromptTl.kill();
             openTl.kill();
             floatTween.kill();
             shadowFloatTween.kill();
+            emergedFloatTween.kill();
+            emergedShadowFloatTween.kill();
             splitSubtitle?.revert();
             window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('scroll', keepTopWhileSealed);
+            window.removeEventListener('scroll', handleEmergedFloatScroll);
+            window.removeEventListener('keydown', lockKeyScroll);
           };
-      },
-      stageRef
-    );
+        },
+        stageRef
+      );
 
-    return () => mm.revert();
-  }, [edition.slug, isOpen, replayNonce, onOpeningStart, onRevealHero, onComplete]);
+      return () => mm.revert();
+    },
+    {
+      scope: stageRef,
+      dependencies: [edition.slug, replayNonce, disabled],
+      revertOnUpdate: true,
+    }
+  );
 
   const handleOpenClick = contextSafe(() => {
     triggerOpenRef.current();
   });
 
-  const handleSkipClick = contextSafe(() => {
-    if (hasTriggeredRef.current) return;
-    hasTriggeredRef.current = true;
-    onOpeningStart();
-    onRevealHero();
-    gsap.to(stageRef.current, {
-      autoAlpha: 0,
-      duration: 0.35,
-      ease: 'power2.out',
-      onComplete: () => onComplete(),
-    });
-  });
-
-  if (isOpen) return null;
+  if (disabled) return null;
 
   return (
     <div
       ref={stageRef}
-      role="dialog"
-      aria-modal="true"
+      role="region"
       aria-label={`${edition.editionBadge} golden envelope`}
-      className="fixed inset-0 z-40 flex flex-col items-center justify-center px-4 py-6 bg-[#FAF8F3]/12 overflow-hidden select-none"
+      className={`absolute inset-0 z-40 flex flex-col items-center justify-center px-4 py-6 bg-[#FAF8F3]/10 overflow-hidden select-none ${
+        isEmerged ? 'touch-pan-y pointer-events-none' : 'touch-none pointer-events-auto'
+      }`}
     >
-      {/* Discreet Skip Intro Trigger */}
-      <button
-        type="button"
-        data-skip-btn
-        onClick={handleSkipClick}
-        className="fixed top-5 right-5 z-50 px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white border border-[#B8923E]/35 shadow-[0_6px_18px_rgba(140,104,25,0.12)] text-[11px] font-mono uppercase tracking-[0.18em] text-[#7A5812] hover:text-[#4E3608] transition-colors cursor-pointer"
-      >
-        Skip Intro
-      </button>
-
       {/* MotionPath Golden Light Motes Overlay */}
       <svg
         viewBox="0 0 680 540"
         fill="none"
-        className="pointer-events-none fixed inset-0 m-auto w-[min(98vw,680px)] h-auto z-50 overflow-visible"
+        className="pointer-events-none absolute inset-0 m-auto w-[min(98vw,680px)] h-auto z-50 overflow-visible"
         aria-hidden="true"
       >
         <defs>
@@ -552,10 +1039,16 @@ export function GoldenEnvelopeStage({
       >
         <div
           ref={envelopeBodyRef}
-          className="relative w-full aspect-[1.42/1] will-change-transform"
+          onClick={handleOpenClick}
+          className={`relative w-full aspect-[1.42/1] pointer-events-auto will-change-transform ${
+            isEmerged ? 'touch-pan-y' : 'touch-none'
+          } ${isUnsealing ? 'cursor-default' : 'cursor-pointer'}`}
         >
           {/* Layer 1: Inner Champagne-Gold Envelope Back & Guilloché Liner */}
-          <div className="absolute inset-0 z-[1] rounded-2xl overflow-hidden shadow-[0_32px_70px_-18px_rgba(122,88,18,0.34)] border border-[#B8923E]/45">
+          <div
+            ref={envelopeBackRef}
+            className="absolute inset-0 z-[1] rounded-2xl overflow-hidden shadow-[0_32px_70px_-18px_rgba(122,88,18,0.34)] border border-[#B8923E]/45 will-change-transform"
+          >
             <svg viewBox="0 0 520 366" className="w-full h-full" preserveAspectRatio="none" aria-hidden="true">
               <defs>
                 <linearGradient id={`${uid}-linerGrad`} x1="0%" y1="0%" x2="100%" y2="100%">
@@ -653,10 +1146,10 @@ export function GoldenEnvelopeStage({
             </div>
           </div>
 
-          {/* Layer 3: Front Metallic 24k Gold Pocket (Left, Right, Bottom Triangular Flaps) */}
+          {/* Layer 3: Front Metallic 24k Gold Pocket */}
           <div
             ref={pocketRef}
-            className="absolute inset-0 z-[20] rounded-2xl overflow-hidden pointer-events-none"
+            className="absolute inset-0 z-[20] rounded-2xl overflow-hidden pointer-events-none will-change-transform"
           >
             <svg viewBox="0 0 520 366" className="w-full h-full" preserveAspectRatio="none" aria-hidden="true">
               <defs>
@@ -678,24 +1171,20 @@ export function GoldenEnvelopeStage({
                 </linearGradient>
               </defs>
 
-              {/* Left & Right Fold Flaps */}
               <polygon points="0,0 264,196 0,366" fill={`url(#${uid}-goldLeft)`} />
               <polygon points="520,0 256,196 520,366" fill={`url(#${uid}-goldRight)`} />
 
-              {/* Subtle Fold Shadow Seam */}
               <path
                 d="M0,366 L235,176 Q260,156 285,176 L520,366"
                 fill="rgba(102, 68, 12, 0.2)"
                 transform="translate(0, -3)"
               />
 
-              {/* Bottom Main Pocket Flap */}
               <path
                 d="M0,366 L236,178 Q260,159 284,178 L520,366 Z"
                 fill={`url(#${uid}-goldBottom)`}
               />
 
-              {/* Embossed Gold Foil Trim Drawn via DrawSVGPlugin */}
               <path
                 data-foil-draw
                 d="M14,358 L238,184 Q260,167 282,184 L506,358"
@@ -714,7 +1203,6 @@ export function GoldenEnvelopeStage({
               />
             </svg>
 
-            {/* Front Addressee Plaque on Pocket */}
             <div className="absolute inset-x-0 bottom-2.5 sm:bottom-5 flex justify-center px-4 sm:px-6">
               <div className="px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-[#FFFDF7]/90 backdrop-blur-md border border-[#9E731D]/35 shadow-[0_8px_22px_rgba(107,77,14,0.16)] text-center max-w-[84%]">
                 <p className="text-[8.5px] sm:text-[10px] font-mono uppercase tracking-[0.18em] sm:tracking-[0.22em] text-[#8C6414] truncate">
@@ -726,7 +1214,6 @@ export function GoldenEnvelopeStage({
               </div>
             </div>
 
-            {/* Sweeping Diagonal Metallic Foil Sheen */}
             <div
               ref={sheenRef}
               className="absolute inset-y-0 -inset-x-10 pointer-events-none will-change-transform"
@@ -738,7 +1225,7 @@ export function GoldenEnvelopeStage({
             />
           </div>
 
-          {/* Layer 4: 3D Hinged Top Flap with Outer Gold Foil & Inner Champagne Silk Liner */}
+          {/* Layer 4: 3D Hinged Top Flap */}
           <div
             ref={flapRef}
             className="absolute top-0 left-0 right-0 h-[60%] z-[30] pointer-events-none will-change-transform"
@@ -747,7 +1234,6 @@ export function GoldenEnvelopeStage({
               transformOrigin: 'top center',
             }}
           >
-            {/* Outer Face of Top Flap */}
             <div
               className="absolute inset-0"
               style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}
@@ -778,7 +1264,6 @@ export function GoldenEnvelopeStage({
               </svg>
             </div>
 
-            {/* Inner Satin Liner Face of Top Flap (visible once rotated past 90 deg) */}
             <div
               className="absolute inset-0"
               style={{
@@ -814,70 +1299,85 @@ export function GoldenEnvelopeStage({
             </div>
           </div>
 
-          {/* Layer 5: Interactive Embossed Golden Wax Seal Button */}
-          <button
-            ref={sealBtnRef}
-            type="button"
-            onClick={handleOpenClick}
-            disabled={isUnsealing}
-            aria-label="Break golden wax seal and open invitation"
-            className="group absolute left-1/2 top-[53%] sm:top-[55%] -translate-x-1/2 -translate-y-1/2 z-[40] w-16 h-16 sm:w-22 sm:h-22 rounded-full flex items-center justify-center cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7A5812] focus-visible:ring-offset-4 transition-transform duration-300 hover:scale-105 active:scale-95 will-change-transform"
-          >
-            <svg viewBox="0 0 96 96" className="w-full h-full drop-shadow-[0_10px_20px_rgba(92,62,10,0.34)]" aria-hidden="true">
-              <defs>
-                <radialGradient id={`${uid}-waxGrad`} cx="35%" cy="30%" r="70%">
-                  <stop offset="0%" stopColor="#FFF2BF" />
-                  <stop offset="38%" stopColor="#E2B54D" />
-                  <stop offset="78%" stopColor="#B88322" />
-                  <stop offset="100%" stopColor="#855A0E" />
-                </radialGradient>
-                <radialGradient id={`${uid}-waxRim`} cx="50%" cy="50%" r="50%">
-                  <stop offset="65%" stopColor="#9A6B17" stopOpacity="0.25" />
-                  <stop offset="100%" stopColor="#FFF2C4" stopOpacity="0.7" />
-                </radialGradient>
-              </defs>
+          {/* Layer 5: Centered Wrapper around Wax Seal so GSAP scale/y never fights CSS centering */}
+          <div className="absolute left-1/2 top-[53%] sm:top-[55%] -translate-x-1/2 -translate-y-1/2 z-[40]">
+            <button
+              ref={sealBtnRef}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenClick();
+              }}
+              disabled={isUnsealing}
+              aria-label="Click or press to open golden invitation envelope"
+              className={`group w-16 h-16 sm:w-22 sm:h-22 rounded-full flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-4 will-change-transform ${
+                isUnsealing ? 'pointer-events-none cursor-default' : 'cursor-pointer'
+              }`}
+            >
+              <span className="seal-press-target block w-full h-full">
+                <svg viewBox="0 0 96 96" className="w-full h-full overflow-visible drop-shadow-[0_10px_20px_rgba(92,62,10,0.34)]" aria-hidden="true">
+                  <defs>
+                    <radialGradient id={`${uid}-waxGrad`} cx="35%" cy="30%" r="70%">
+                      <stop offset="0%" stopColor="#FFF2BF" />
+                      <stop offset="38%" stopColor="#E2B54D" />
+                      <stop offset="78%" stopColor="#B88322" />
+                      <stop offset="100%" stopColor="#855A0E" />
+                    </radialGradient>
+                    <radialGradient id={`${uid}-waxRim`} cx="50%" cy="50%" r="50%">
+                      <stop offset="65%" stopColor="#9A6B17" stopOpacity="0.25" />
+                      <stop offset="100%" stopColor="#FFF2C4" stopOpacity="0.7" />
+                    </radialGradient>
+                  </defs>
 
-              {/* Target path for MorphSVGPlugin (hidden) */}
-              <path ref={sealOpenShapeRef} d={SEAL_OPEN_STARBURST_PATH} fill="none" opacity="0" />
+                  <circle
+                    ref={pulseRing1Ref}
+                    cx="48"
+                    cy="47"
+                    r="45"
+                    fill="none"
+                    stroke="#FFFFFF"
+                    strokeOpacity="0.9"
+                    strokeWidth="2.2"
+                  />
 
-              {/* Scalloped Molten Wax Medallion */}
-              <path
-                ref={sealShapeRef}
-                d={SEAL_CLOSED_PATH}
-                fill={`url(#${uid}-waxGrad)`}
-                stroke="#FFF3C6"
-                strokeOpacity="0.65"
-                strokeWidth="1.2"
-              />
+                  <path ref={sealOpenShapeRef} d={SEAL_OPEN_STARBURST_PATH} fill="none" opacity="0" />
 
-              {/* Inner Stamped Coin Ring */}
-              <circle cx="48" cy="47" r="24" fill={`url(#${uid}-waxRim)`} stroke="#FFF0BA" strokeOpacity="0.6" strokeWidth="1" />
+                  <path
+                    ref={sealShapeRef}
+                    d={SEAL_CLOSED_PATH}
+                    fill={`url(#${uid}-waxGrad)`}
+                    stroke="#FFF3C6"
+                    strokeOpacity="0.65"
+                    strokeWidth="1.2"
+                  />
 
-              {/* Embossed Computing Society Monogram (`</>`) */}
-              <path
-                d="M39 42L33 47L39 52M57 42L63 47L57 52M50 37L46 57"
-                stroke="#5F3F08"
-                strokeWidth="2.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                fill="none"
-              />
+                  <circle cx="48" cy="47" r="24" fill={`url(#${uid}-waxRim)`} stroke="#FFF0BA" strokeOpacity="0.6" strokeWidth="1" />
 
-              {/* Subtle DrawSVG Halo Countdown Ring */}
-              <circle
-                ref={sealRingRef}
-                cx="48"
-                cy="47"
-                r="43"
-                fill="none"
-                stroke="#FFF7DA"
-                strokeOpacity="0.88"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                transform="rotate(-90 48 47)"
-              />
-            </svg>
-          </button>
+                  <path
+                    d="M39 42L33 47L39 52M57 42L63 47L57 52M50 37L46 57"
+                    stroke="#5F3F08"
+                    strokeWidth="2.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+
+                  <circle
+                    ref={sealRingRef}
+                    cx="48"
+                    cy="47"
+                    r="45"
+                    fill="none"
+                    stroke="#FFFFFF"
+                    strokeOpacity="0.92"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    transform="rotate(-90 48 47)"
+                  />
+                </svg>
+              </span>
+            </button>
+          </div>
         </div>
 
         {/* Soft Floor Elevation Shadow */}
@@ -888,15 +1388,41 @@ export function GoldenEnvelopeStage({
         />
 
         {/* Invitation Seal Hint */}
-        <div ref={hintRef} className="mt-4 flex flex-col items-center gap-1.5 text-center">
+        <div ref={hintRef} className="mt-4 flex flex-col items-center gap-1.5 text-center pointer-events-auto">
           <button
             type="button"
             onClick={handleOpenClick}
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/85 hover:bg-white border border-[#B8923E]/40 shadow-[0_8px_22px_rgba(140,104,25,0.14)] text-[11px] font-mono uppercase tracking-[0.2em] text-[#7A5812] hover:text-[#573E0B] transition-colors cursor-pointer"
+            className="btn-tactile inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/88 hover:bg-white border border-[#B8923E]/40 shadow-[0_8px_22px_rgba(140,104,25,0.14)] text-[11px] font-mono uppercase tracking-[0.2em] text-[#7A5812] hover:text-[#573E0B] cursor-pointer"
           >
-            <span>Tap Wax Seal or Scroll to Open</span>
+            <span>Click or Press Envelope to Open</span>
           </button>
         </div>
+      </div>
+
+      {/* Scroll-Down Cue (appears after card emerges; stays visible until user scrolls down) */}
+      <div
+        ref={scrollPromptRef}
+        className={`absolute bottom-5 sm:bottom-7 inset-x-0 z-50 flex justify-center px-4 ${
+          isEmerged ? 'pointer-events-auto' : 'pointer-events-none'
+        }`}
+        aria-hidden={!isEmerged}
+      >
+        <button
+          type="button"
+          tabIndex={isEmerged ? 0 : -1}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRequestScrollDown();
+          }}
+          className="btn-tactile inline-flex items-center gap-2 px-5 py-2 rounded-full bg-white/92 hover:bg-white backdrop-blur-md border border-[#B8923E]/45 shadow-[0_10px_28px_rgba(122,88,18,0.18)] text-[11px] font-mono uppercase tracking-[0.2em] text-[#7A5812] hover:text-[#4F3708] cursor-pointer"
+        >
+          <span>Scroll Down to Continue</span>
+          <ArrowDown
+            size={14}
+            className="animate-scroll-cue"
+            style={{ color: edition.theme.accentHex }}
+          />
+        </button>
       </div>
     </div>
   );
