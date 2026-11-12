@@ -32,11 +32,16 @@ lerna-debug.log*
 .eslintcache
 coverage/
 
-# Agent tooling
+# Agent tooling, local plans & artifacts
 .gemini/
 **/.gemini/
 .agents/
 **/.agents/
+plans/
+**/plans/
+production_artifacts/
+**/production_artifacts/
+skills-lock.json
 
 # Editor & OS files
 .DS_Store
