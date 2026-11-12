@@ -3,7 +3,7 @@ import { InvitationView } from './components/pages/InvitationView';
 import { NotFoundView } from './components/pages/NotFoundView';
 
 /**
- * Defensive redirect preserving query parameters when mistyped URL /chieft-guest is visited.
+ * Defensive redirect preserving query parameters when mistyped URLs (/cheif-guest, /chieft-guest) are visited.
  */
 function ChiefGuestAliasRedirect() {
   const { search } = useLocation();
@@ -15,6 +15,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<InvitationView editionSlug="overview" />} />
       <Route path="/chief-guest" element={<InvitationView editionSlug="chief-guest" />} />
+      <Route path="/cheif-guest" element={<ChiefGuestAliasRedirect />} />
       <Route path="/chieft-guest" element={<ChiefGuestAliasRedirect />} />
       <Route path="/farewell" element={<InvitationView editionSlug="farewell" />} />
       <Route path="/welcome" element={<InvitationView editionSlug="welcome" />} />
