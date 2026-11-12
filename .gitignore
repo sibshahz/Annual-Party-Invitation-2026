@@ -32,6 +32,12 @@ lerna-debug.log*
 .eslintcache
 coverage/
 
+# Agent tooling
+.gemini/
+**/.gemini/
+.agents/
+**/.agents/
+
 # Editor & OS files
 .DS_Store
 Thumbs.db
